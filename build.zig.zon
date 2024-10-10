@@ -1,0 +1,18 @@
+.{
+    .name = "ddui",
+    .version = "0.0.0",
+    .minimum_zig_version = "0.13.0",
+    .dependencies = .{
+        .win32 = .{
+            .url = "https://github.com/marlersoft/zigwin32/archive/407a4c7b869ee3d10db520fdfae8b9faf9b2adb5.tar.gz",
+            .hash = "1220cc9c9028e20f4ec2ece1155ae3479acc1cc509f9ab93acb74e8f5bbf8eefd2a9",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "ddui.zig",
+        "ddui",
+        "example",
+    },
+}
