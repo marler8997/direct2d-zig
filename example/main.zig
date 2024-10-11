@@ -25,15 +25,7 @@ fn oom(e: error{OutOfMemory}) noreturn {
 }
 
 const apiFailNoreturn = ddui.apiFailNoreturnDefault;
-fn lastErrorI32() i32 {
-    return @bitCast(@intFromEnum(win32.GetLastError()));
-}
 
-fn dpiFromHwnd(hwnd: win32.HWND) u32 {
-    const value = win32.GetDpiForWindow(hwnd);
-    if (value == 0) apiFailNoreturn("GetDpiForWindow", lastErrorI32());
-    return value;
-}
 const Dpi = struct {
     value: u32,
     pub fn eql(self: Dpi, other: Dpi) bool {
@@ -94,10 +86,6 @@ pub fn targetFromPoint(layout: *const Layout, point: win32.POINT) ?MouseTarget {
     if (ddui.rectContainsPoint(layout.new_window_button, point))
         return .new_window_button;
     return null;
-}
-
-fn invalidateHwnd(hwnd: win32.HWND) void {
-    if (0 == win32.InvalidateRect(hwnd, null, 0)) apiFailNoreturn("InvalidateRect", lastErrorI32());
 }
 
 const State = struct {
@@ -169,7 +157,7 @@ fn newWindow() void {
         };
         global.window_class = win32.RegisterClassExW(&wc);
     }
-    if (global.window_class == 0) apiFailNoreturn("RegisterClass", lastErrorI32());
+    if (global.window_class == 0) apiFailNoreturn("RegisterClass", .{ .win32 = win32.GetLastError() });
 
     const hwnd = win32.CreateWindowExW(
         .{},
@@ -184,7 +172,7 @@ fn newWindow() void {
         null, // menu
         win32.GetModuleHandleW(null),
         null, // WM_CREATE user data
-    ) orelse apiFailNoreturn("CreateWindow", lastErrorI32());
+    ) orelse apiFailNoreturn("CreateWindow", .{ .win32 = win32.GetLastError() });
 
     {
         // TODO: maybe use DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 if applicable
@@ -203,7 +191,7 @@ fn newWindow() void {
         );
     }
 
-    if (0 == win32.UpdateWindow(hwnd)) apiFailNoreturn("UpdateWindow", lastErrorI32());
+    if (0 == win32.UpdateWindow(hwnd)) apiFailNoreturn("UpdateWindow", .{ .win32 = win32.GetLastError() });
 
     // for some reason this causes the window to paint before being shown so we
     // don't get a white flicker when the window shows up
@@ -211,7 +199,7 @@ fn newWindow() void {
         .NOMOVE = 1,
         .NOSIZE = 1,
         .NOOWNERZORDER = 1,
-    })) apiFailNoreturn("SetWindowPos", lastErrorI32());
+    })) apiFailNoreturn("SetWindowPos", .{ .win32 = win32.GetLastError() });
     _ = win32.ShowWindow(hwnd, .{ .SHOWNORMAL = 1 });
     global.window_count += 1;
 }
@@ -262,14 +250,14 @@ fn WndProc(
             const point = ddui.pointFromLparam(lparam);
             const state = stateFromHwnd(hwnd);
             if (state.mouse.updateTarget(targetFromPoint(&state.layout, point))) {
-                invalidateHwnd(hwnd);
+                win32.invalidateHwnd(hwnd);
             }
         },
         win32.WM_LBUTTONDOWN => {
             const point = ddui.pointFromLparam(lparam);
             const state = stateFromHwnd(hwnd);
             if (state.mouse.updateTarget(targetFromPoint(&state.layout, point))) {
-                invalidateHwnd(hwnd);
+                win32.invalidateHwnd(hwnd);
             }
             state.mouse.setLeftDown();
         },
@@ -277,14 +265,14 @@ fn WndProc(
             const point = ddui.pointFromLparam(lparam);
             const state = stateFromHwnd(hwnd);
             if (state.mouse.updateTarget(targetFromPoint(&state.layout, point))) {
-                invalidateHwnd(hwnd);
+                win32.invalidateHwnd(hwnd);
             }
             if (state.mouse.setLeftUp()) |target| switch (target) {
                 .new_window_button => newWindow(),
             };
         },
         win32.WM_PAINT => {
-            const dpi = dpiFromHwnd(hwnd);
+            const dpi = win32.dpiFromHwnd(hwnd);
             const client_size = getClientSize(hwnd);
             const state = stateFromHwnd(hwnd);
             state.layout.update(dpi, client_size);
@@ -324,15 +312,20 @@ fn WndProc(
                 state.bg_erased = true;
                 const hdc: win32.HDC = @ptrFromInt(wparam);
                 const client_size = getClientSize(hwnd);
-                const brush = win32.CreateSolidBrush(colorrefFromShade(window_bg_shade)) orelse apiFailNoreturn("CreateSolidBrush", lastErrorI32());
-                defer if (0 == win32.DeleteObject(brush)) apiFailNoreturn("DeleteObject", lastErrorI32());
+                const brush = win32.CreateSolidBrush(
+                    colorrefFromShade(window_bg_shade),
+                ) orelse apiFailNoreturn("CreateSolidBrush", .{ .win32 = win32.GetLastError() });
+                defer if (0 == win32.DeleteObject(brush)) apiFailNoreturn("DeleteObject", .{ .win32 = win32.GetLastError() });
                 const client_rect: win32.RECT = .{
                     .left = 0,
                     .top = 0,
                     .right = client_size.x,
                     .bottom = client_size.y,
                 };
-                if (0 == win32.FillRect(hdc, &client_rect, brush)) apiFailNoreturn("FillRect", lastErrorI32());
+                if (0 == win32.FillRect(hdc, &client_rect, brush)) apiFailNoreturn(
+                    "FillRect",
+                    .{ .win32 = win32.GetLastError() },
+                );
             }
             return 1;
         },
@@ -381,13 +374,9 @@ pub fn XY(comptime T: type) type {
     };
 }
 
-fn closeHandle(handle: win32.HANDLE) void {
-    if (0 == win32.CloseHandle(handle)) apiFailNoreturn("CloseHandle", lastErrorI32());
-}
-
 fn getClientSize(hwnd: win32.HWND) XY(i32) {
     var rect: win32.RECT = undefined;
-    if (0 == win32.GetClientRect(hwnd, &rect)) apiFailNoreturn("GetClientRect", lastErrorI32());
+    if (0 == win32.GetClientRect(hwnd, &rect)) apiFailNoreturn("GetClientRect", .{ .win32 = win32.GetLastError() });
     if (rect.left != 0) std.debug.panic("client rect non-zero left {}", .{rect.left});
     if (rect.top != 0) std.debug.panic("client rect non-zero top {}", .{rect.top});
     return .{ .x = rect.right, .y = rect.bottom };

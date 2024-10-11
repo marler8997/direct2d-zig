@@ -11,19 +11,20 @@ const win32 = struct {
 };
 pub const mouse = @import("ddui/mouse.zig");
 
+pub const ErrorCode = union(enum) {
+    win32: win32.WIN32_ERROR,
+    hresult: i32,
+};
+
 // A function has failed that we never expect to fail, so much so that we don't see a point
 // in adding an error code or even continuing on in the program if it does.
-// TODO: allow the root package to override this
-pub fn apiFailNoreturnDefault(comptime function_name: []const u8, last_error: i32) noreturn {
-    // TODO: WIN32_ERROR should be marked as non-exhaustive and we should
-    //       try to get the tag name but it's not marked that way
-    std.debug.panic(function_name ++ " unexpectedly failed, error={}", .{last_error});
+pub fn apiFailNoreturnDefault(comptime function_name: []const u8, ec: ErrorCode) noreturn {
+    switch (ec) {
+        .win32 => |e| std.debug.panic(function_name ++ " unexpectedly failed with {}", .{e.fmt()}),
+        .hresult => |hr| std.debug.panic(function_name ++ " unexpectedly failed, hresult=0x{x}", .{@as(u32, @bitCast(hr))}),
+    }
 }
 const apiFailNoreturn = if (@hasDecl(root, "apiFatalNoreturn")) root.apiFailNoreturn else apiFailNoreturnDefault;
-
-fn lastErrorI32() i32 {
-    return @bitCast(@intFromEnum(win32.GetLastError()));
-}
 
 pub fn loword(value: anytype) u16 {
     switch (@typeInfo(@TypeOf(value))) {
@@ -233,7 +234,10 @@ pub const Render = struct {
         err: *Error,
     ) error{Ddui}!void {
         std.debug.assert(self.kind == .hwnd);
-        _ = win32.BeginPaint(self.kind.hwnd, paint) orelse apiFailNoreturn("BeginPaint", lastErrorI32());
+        _ = win32.BeginPaint(self.kind.hwnd, paint) orelse return apiFailNoreturn(
+            "BeginPaint",
+            .{ .win32 = win32.GetLastError() },
+        );
         self.target.SetDpi(@floatFromInt(dpi), @floatFromInt(dpi));
 
         {
@@ -251,7 +255,10 @@ pub const Render = struct {
             if (hr != win32.S_OK)
                 return err.set(hr, .EndDraw);
         }
-        if (0 == win32.EndPaint(self.kind.hwnd, paint)) apiFailNoreturn("EndPaint", lastErrorI32());
+        if (0 == win32.EndPaint(self.kind.hwnd, paint)) return apiFailNoreturn(
+            "EndPaint",
+            .{ .win32 = win32.GetLastError() },
+        );
     }
 
     pub fn brush0(self: *Render, color: win32.D2D_COLOR_F) *win32.ID2D1Brush {
@@ -265,7 +272,7 @@ pub const Render = struct {
             b.SetColor(&color);
         } else {
             const hr = self.target.CreateSolidColorBrush(&color, null, &self.solid_brushes[index]);
-            if (hr != win32.S_OK) apiFailNoreturn("CreateSolidBrush", hr);
+            if (hr != win32.S_OK) apiFailNoreturn("CreateSolidBrush", .{ .hresult = hr });
         }
         return &self.solid_brushes[index].?.ID2D1Brush;
     }
