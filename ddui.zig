@@ -11,32 +11,11 @@ const win32 = struct {
 };
 pub const mouse = @import("ddui/mouse.zig");
 
-pub fn loword(value: anytype) u16 {
-    switch (@typeInfo(@TypeOf(value))) {
-        .Int => |int| switch (int.signedness) {
-            .signed => return loword(@as(@Type(.{ .Int = .{ .signedness = .unsigned, .bits = int.bits } }), @bitCast(value))),
-            .unsigned => return if (int.bits <= 16) value else @intCast(0xffff & value),
-        },
-        else => {},
-    }
-    @compileError("unsupported type " ++ @typeName(@TypeOf(value)));
-}
-pub fn hiword(value: anytype) u16 {
-    switch (@typeInfo(@TypeOf(value))) {
-        .Int => |int| switch (int.signedness) {
-            .signed => return hiword(@as(@Type(.{ .Int = .{ .signedness = .unsigned, .bits = int.bits } }), @bitCast(value))),
-            .unsigned => return @intCast(0xffff & (value >> 16)),
-        },
-        else => {},
-    }
-    @compileError("unsupported type " ++ @typeName(@TypeOf(value)));
-}
-
 fn xFromLparam(lparam: win32.LPARAM) i16 {
-    return @bitCast(loword(lparam));
+    return @bitCast(win32.loword(lparam));
 }
 fn yFromLparam(lparam: win32.LPARAM) i16 {
-    return @bitCast(hiword(lparam));
+    return @bitCast(win32.hiword(lparam));
 }
 
 pub fn pointFromLparam(lparam: win32.LPARAM) win32.POINT {
@@ -65,21 +44,6 @@ pub fn rectContainsPoint(r: win32.RECT, p: win32.POINT) bool {
         p.x < r.right and
         p.y >= r.top and
         p.y < r.bottom;
-}
-
-pub fn scaleDpiT(comptime T: type, value: anytype, dpi: u32) T {
-    std.debug.assert(dpi >= 96);
-    switch (@typeInfo(T)) {
-        .ComptimeFloat => @compileError("should this work?"),
-        .Float => {
-            return value * (@as(T, @floatFromInt(dpi)) / @as(T, 96.0));
-        },
-        .Int => return @intFromFloat(@as(f32, @floatFromInt(value)) * (@as(f32, @floatFromInt(dpi)) / 96.0)),
-        else => @compileError("scale_dpi does not support type " ++ @typeName(@TypeOf(value))),
-    }
-}
-pub fn scaleDpi(value: anytype, dpi: u32) @TypeOf(value) {
-    return scaleDpiT(@TypeOf(value), dpi);
 }
 
 pub fn shade8(shade: u8) win32.D2D_COLOR_F {

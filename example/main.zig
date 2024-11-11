@@ -46,7 +46,7 @@ const Dpi = struct {
 fn createTextFormatCenter18pt(dpi: Dpi) *win32.IDWriteTextFormat {
     var err: HResultError = undefined;
     return ddui.createTextFormat(global.dwrite_factory, &err, .{
-        .size = ddui.scaleDpiT(f32, 18, dpi.value),
+        .size = win32.scaleDpi(f32, 18, dpi.value),
         .family_name = win32.L("Segoe UI Emoji"),
         .center_x = true,
         .center_y = true,
@@ -66,13 +66,13 @@ const Layout = struct {
     title: win32.RECT,
     new_window_button: win32.RECT,
     pub fn update(self: *Layout, dpi: u32, client_size: XY(i32)) void {
-        const margin = ddui.scaleDpiT(i32, 30, dpi);
+        const margin = win32.scaleDpi(i32, 30, dpi);
         // todo: actually calculate font metrics?
-        const max_main_font_height: i32 = ddui.scaleDpiT(i32, 30, dpi);
-        const button_height: i32 = ddui.scaleDpiT(i32, 40, dpi);
-        const button_width: i32 = ddui.scaleDpiT(i32, 150, dpi);
+        const max_main_font_height: i32 = win32.scaleDpi(i32, 30, dpi);
+        const button_height: i32 = win32.scaleDpi(i32, 40, dpi);
+        const button_width: i32 = win32.scaleDpi(i32, 150, dpi);
         const title_bottom: i32 = margin + max_main_font_height;
-        const button_y: i32 = title_bottom + ddui.scaleDpiT(i32, 40, dpi);
+        const button_y: i32 = title_bottom + win32.scaleDpi(i32, 40, dpi);
         self.* = .{
             .title = .{
                 .left = margin,
@@ -199,7 +199,7 @@ pub fn paint(
         .{},
         .NATURAL,
     );
-    const round = ddui.scaleDpiT(f32, 4, dpi);
+    const round = win32.scaleDpi(f32, 4, dpi);
     ddui.FillRoundedRectangle(
         &d2d.target.ID2D1RenderTarget,
         layout.new_window_button,
