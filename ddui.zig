@@ -11,21 +11,6 @@ const win32 = struct {
 };
 pub const mouse = @import("ddui/mouse.zig");
 
-pub const ErrorCode = union(enum) {
-    win32: win32.WIN32_ERROR,
-    hresult: i32,
-};
-
-// A function has failed that we never expect to fail, so much so that we don't see a point
-// in adding an error code or even continuing on in the program if it does.
-pub fn apiFailNoreturnDefault(comptime function_name: []const u8, ec: ErrorCode) noreturn {
-    switch (ec) {
-        .win32 => |e| std.debug.panic(function_name ++ " unexpectedly failed with {}", .{e.fmt()}),
-        .hresult => |hr| std.debug.panic(function_name ++ " unexpectedly failed, hresult=0x{x}", .{@as(u32, @bitCast(hr))}),
-    }
-}
-const apiFailNoreturn = if (@hasDecl(root, "apiFatalNoreturn")) root.apiFailNoreturn else apiFailNoreturnDefault;
-
 pub fn loword(value: anytype) u16 {
     switch (@typeInfo(@TypeOf(value))) {
         .Int => |int| switch (int.signedness) {
@@ -114,209 +99,61 @@ pub fn rgb8(r: u8, g: u8, b: u8) win32.D2D_COLOR_F {
     };
 }
 
-const ErrorContext = enum {
-    CreateFactory,
-    CreateRenderTarget,
-    BindDC,
-    EndDraw,
-    CreatePathGeometry,
-    PathGeometryOpen,
-    ResizeRenderTarget,
-    GetDeviceContext,
-};
-
-pub const Error = struct {
-    /// a win32 HRESULT
-    hr: u32 = 0,
-    context: ErrorContext = undefined,
-    pub fn set(
-        self: *Error,
-        hr: win32.HRESULT,
-        context: ErrorContext,
-    ) error{Ddui} {
-        self.* = .{ .hr = @bitCast(hr), .context = context };
-        return error.Ddui;
-    }
-};
-
-fn createFactory(debug_level: win32.D2D1_DEBUG_LEVEL, err: *Error) error{Ddui}!*win32.ID2D1Factory {
+pub fn createFactory(
+    factory_type: win32.D2D1_FACTORY_TYPE,
+    opt: struct {
+        debug_level: win32.D2D1_DEBUG_LEVEL = .NONE,
+    },
+    err: *HResultError,
+) error{HResult}!*win32.ID2D1Factory {
     var factory: *win32.ID2D1Factory = undefined;
     const options: win32.D2D1_FACTORY_OPTIONS = .{
-        .debugLevel = debug_level,
+        .debugLevel = opt.debug_level,
     };
     const hr = win32.D2D1CreateFactory(
-        .SINGLE_THREADED,
+        factory_type,
         win32.IID_ID2D1Factory,
         &options,
         @ptrCast(&factory),
     );
-    if (hr != win32.S_OK) return err.set(hr, .CreateFactory);
+    if (hr < 0) return err.set(hr, "D2D1CreateFactory");
     return factory;
 }
 
-pub const InitOptions = struct {
-    debug_level: win32.D2D1_DEBUG_LEVEL = .NONE,
-};
-
-pub fn initHwnd(hwnd: win32.HWND, err: *Error, options: InitOptions) error{Ddui}!Render {
-    const factory = try createFactory(options.debug_level, err);
-    errdefer _ = factory.IUnknown.Release();
-
-    var target: *win32.ID2D1HwndRenderTarget = undefined;
-    const target_props = win32.D2D1_RENDER_TARGET_PROPERTIES{
-        .type = .DEFAULT,
-        .pixelFormat = .{
-            .format = .B8G8R8A8_UNORM,
-            .alphaMode = .PREMULTIPLIED,
-        },
-        .dpiX = 0,
-        .dpiY = 0,
-        .usage = .{},
-        .minLevel = .DEFAULT,
+pub fn FillRoundedRectangle(
+    target: *const win32.ID2D1RenderTarget,
+    rect: win32.RECT,
+    roundX: f32,
+    roundY: f32,
+    b: *win32.ID2D1Brush,
+) void {
+    const rounded_rect: win32.D2D1_ROUNDED_RECT = .{
+        .rect = rectFloatFromInt(rect),
+        .radiusX = roundX,
+        .radiusY = roundY,
     };
-    const hwnd_target_props = win32.D2D1_HWND_RENDER_TARGET_PROPERTIES{
-        .hwnd = hwnd,
-        .pixelSize = .{ .width = 0, .height = 0 },
-        .presentOptions = .{},
-    };
-
-    {
-        const hr = factory.CreateHwndRenderTarget(
-            &target_props,
-            &hwnd_target_props,
-            @ptrCast(&target),
-        );
-        if (hr < 0) return err.set(hr, .CreateRenderTarget);
-    }
-
-    {
-        var dc: *win32.ID2D1DeviceContext = undefined;
-        {
-            const hr = target.IUnknown.QueryInterface(win32.IID_ID2D1DeviceContext, @ptrCast(&dc));
-            if (hr < 0) return err.set(hr, .GetDeviceContext);
-        }
-        defer _ = dc.IUnknown.Release();
-        // just make everything DPI aware, all applications should just do this
-        dc.SetUnitMode(win32.D2D1_UNIT_MODE_PIXELS);
-    }
-
-    return .{
-        .factory = factory,
-        .target = @ptrCast(target),
-        .kind = .{ .hwnd = hwnd },
-    };
+    target.FillRoundedRectangle(&rounded_rect, b);
 }
 
-pub const Render = struct {
-    factory: *win32.ID2D1Factory,
-    target: *win32.ID2D1RenderTarget,
-    kind: union(enum) {
-        hwnd: win32.HWND,
-    },
-    solid_brushes: [2]?*win32.ID2D1SolidColorBrush = [2]?*win32.ID2D1SolidColorBrush{ null, null },
-
-    pub fn deinit(self: *Render) void {
-        for (self.solid_brushes) |maybe_brush| {
-            if (maybe_brush) |b| {
-                _ = b.IUnknown.Release();
-            }
-        }
-        _ = self.target.IUnknown.Release();
-        _ = self.factory.IUnknown.Release();
-        self.* = undefined;
-    }
-
-    pub fn beginPaintHwnd(
-        self: *const Render,
-        paint: *win32.PAINTSTRUCT,
-        dpi: u32,
-        size: win32.D2D_SIZE_U,
-        err: *Error,
-    ) error{Ddui}!void {
-        std.debug.assert(self.kind == .hwnd);
-        _ = win32.BeginPaint(self.kind.hwnd, paint) orelse return apiFailNoreturn(
-            "BeginPaint",
-            .{ .win32 = win32.GetLastError() },
-        );
-        self.target.SetDpi(@floatFromInt(dpi), @floatFromInt(dpi));
-
-        {
-            const hr = (@as(*win32.ID2D1HwndRenderTarget, @ptrCast(self.target))).Resize(&size);
-            if (hr != win32.S_OK)
-                return err.set(hr, .ResizeRenderTarget);
-        }
-        self.target.BeginDraw();
-    }
-
-    pub fn endPaintHwnd(self: *const Render, paint: *win32.PAINTSTRUCT, err: *Error) error{Ddui}!void {
-        std.debug.assert(self.kind == .hwnd);
-        {
-            const hr = self.target.EndDraw(null, null);
-            if (hr != win32.S_OK)
-                return err.set(hr, .EndDraw);
-        }
-        if (0 == win32.EndPaint(self.kind.hwnd, paint)) return apiFailNoreturn(
-            "EndPaint",
-            .{ .win32 = win32.GetLastError() },
-        );
-    }
-
-    pub fn brush0(self: *Render, color: win32.D2D_COLOR_F) *win32.ID2D1Brush {
-        return self.brush(0, color);
-    }
-    pub fn brush1(self: *Render, color: win32.D2D_COLOR_F) *win32.ID2D1Brush {
-        return self.brush(1, color);
-    }
-    pub fn brush(self: *Render, index: usize, color: win32.D2D_COLOR_F) *win32.ID2D1Brush {
-        if (self.solid_brushes[index]) |b| {
-            b.SetColor(&color);
-        } else {
-            const hr = self.target.CreateSolidColorBrush(&color, null, &self.solid_brushes[index]);
-            if (hr != win32.S_OK) apiFailNoreturn("CreateSolidBrush", .{ .hresult = hr });
-        }
-        return &self.solid_brushes[index].?.ID2D1Brush;
-    }
-
-    pub fn Clear(self: *const Render, color: win32.D2D_COLOR_F) void {
-        self.target.Clear(&color);
-    }
-
-    pub fn FillRoundedRectangle(self: *Render, rect: win32.RECT, roundX: f32, roundY: f32, c: win32.D2D_COLOR_F) void {
-        const rounded_rect: win32.D2D1_ROUNDED_RECT = .{
-            .rect = rectFloatFromInt(rect),
-            .radiusX = roundX,
-            .radiusY = roundY,
-        };
-        //const rect_f = rectFloatFromInt(rect);
-        self.target.FillRoundedRectangle(&rounded_rect, self.brush0(c));
-    }
-
-    // This takes a RECT which uses integers and results in crisp edges for filling rectangles.
-    pub fn FillRectangle(self: *Render, rect: win32.RECT, color: win32.D2D_COLOR_F) void {
-        const rect_f = rectFloatFromInt(rect);
-        self.target.FillRectangle(&rect_f, self.brush0(color));
-    }
-
-    pub fn DrawText(
-        self: *Render,
-        str: []const u16,
-        text_format: *win32.IDWriteTextFormat,
-        rect: win32.D2D_RECT_F,
-        color: win32.D2D_COLOR_F,
-        opt: win32.D2D1_DRAW_TEXT_OPTIONS,
-        measure: win32.DWRITE_MEASURING_MODE,
-    ) void {
-        self.target.DrawText(
-            @ptrCast(str.ptr),
-            @intCast(str.len),
-            text_format,
-            &rect,
-            self.brush0(color),
-            opt,
-            measure,
-        );
-    }
-};
+pub fn DrawText(
+    target: *const win32.ID2D1RenderTarget,
+    str: []const u16,
+    text_format: *win32.IDWriteTextFormat,
+    rect: win32.D2D_RECT_F,
+    brush: *win32.ID2D1Brush,
+    opt: win32.D2D1_DRAW_TEXT_OPTIONS,
+    measure: win32.DWRITE_MEASURING_MODE,
+) void {
+    target.DrawText(
+        @ptrCast(str.ptr),
+        @intCast(str.len),
+        text_format,
+        &rect,
+        brush,
+        opt,
+        measure,
+    );
+}
 
 pub const TextFormatOptions = struct {
     family_name: [:0]const u16,
@@ -332,15 +169,28 @@ pub const TextFormatOptions = struct {
 
 pub const HResultError = struct {
     /// a win32 HRESULT
-    hr: u32 = 0,
-    context: []const u8,
+    hr: i32 = 0,
+    context: [:0]const u8,
     pub fn set(
         self: *HResultError,
         hr: win32.HRESULT,
-        context: []const u8,
+        context: [:0]const u8,
     ) error{HResult} {
         self.* = .{ .hr = @bitCast(hr), .context = context };
         return error.HResult;
+    }
+    pub fn format(
+        self: HResultError,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print(
+            "{s} failed, hresult=0x{x}",
+            .{ self.context, @as(u32, @bitCast(self.hr)) },
+        );
     }
 };
 
