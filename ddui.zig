@@ -174,7 +174,7 @@ pub fn createTextFormat(
             win32.DWRITE_FONT_STRETCH_NORMAL,
             opt.size,
             opt.locale,
-            @ptrCast(&text_format),
+            &text_format,
         );
         if (hr < 0) return err_store.set(hr, "CreateTextFormat");
     }

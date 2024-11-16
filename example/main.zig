@@ -126,7 +126,7 @@ const D2d = struct {
             const hr = global.d2d_factory.CreateHwndRenderTarget(
                 &target_props,
                 &hwnd_target_props,
-                @ptrCast(&target),
+                &target,
             );
             if (hr < 0) return err.set(hr, "CreateHwndRenderTarget");
         }
@@ -146,13 +146,13 @@ const D2d = struct {
         var brush: *win32.ID2D1SolidColorBrush = undefined;
         {
             const color: win32.D2D_COLOR_F = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
-            const hr = target.ID2D1RenderTarget.CreateSolidColorBrush(&color, null, @ptrCast(&brush));
+            const hr = target.ID2D1RenderTarget.CreateSolidColorBrush(&color, null, &brush);
             if (hr < 0) return err.set(hr, "CreateSolidBrush");
         }
         errdefer _ = brush.IUnknown.Release();
 
         return .{
-            .target = @ptrCast(target),
+            .target = target,
             .brush = brush,
         };
     }
