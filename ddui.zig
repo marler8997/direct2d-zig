@@ -62,6 +62,14 @@ pub fn rgb8(r: u8, g: u8, b: u8) win32.D2D_COLOR_F {
         .a = 1.0,
     };
 }
+pub fn rgba8(r: u8, g: u8, b: u8, a: u8) win32.D2D_COLOR_F {
+    return .{
+        .r = @as(f32, @floatFromInt(r)) / 255.0,
+        .g = @as(f32, @floatFromInt(g)) / 255.0,
+        .b = @as(f32, @floatFromInt(b)) / 255.0,
+        .a = @as(f32, @floatFromInt(a)) / 255.0,
+    };
+}
 
 pub fn createFactory(
     factory_type: win32.D2D1_FACTORY_TYPE,
@@ -82,6 +90,20 @@ pub fn createFactory(
     );
     if (hr < 0) return err.set(hr, "D2D1CreateFactory");
     return factory;
+}
+
+pub fn FillRectangle(
+    target: *const win32.ID2D1RenderTarget,
+    rect: win32.RECT,
+    b: *win32.ID2D1Brush,
+) void {
+    const rect_d2d: win32.D2D_RECT_F = .{
+        .left = @floatFromInt(rect.left),
+        .top = @floatFromInt(rect.top),
+        .right = @floatFromInt(rect.right),
+        .bottom = @floatFromInt(rect.bottom),
+    };
+    target.FillRectangle(&rect_d2d, b);
 }
 
 pub fn FillRoundedRectangle(
