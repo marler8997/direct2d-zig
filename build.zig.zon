@@ -1,11 +1,12 @@
 .{
-    .name = "ddui",
+    .name = .ddui,
     .version = "0.0.0",
-    .minimum_zig_version = "0.13.0",
+    .fingerprint = 0xbcf888fb30786ad7,
+    .minimum_zig_version = "0.14.0",
     .dependencies = .{
         .win32 = .{
-            .url = "git+https://github.com/marlersoft/zigwin32#32d085ee67374ad2ec24fc012e6876ca27958fb7",
-            .hash = "1220adcf9ec0447c6a170ed069ed9d52c999b3dcae3557b3647878bf65ee59a2f5d0",
+            .url = "git+https://github.com/marlersoft/zigwin32#463e968fd43b98d1f4bc9e12c6eaab607a6e2e32",
+            .hash = "zigwin32-25.0.28-preview-AAAAAMco_ANvuBFnzPa3labgyPqid2015o7CWgOHtT1_",
         },
     },
     .paths = .{

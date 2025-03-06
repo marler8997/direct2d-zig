@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const win32_dep = b.dependency("win32", .{});
-    const win32 = win32_dep.module("zigwin32");
+    const win32 = win32_dep.module("win32");
     const ddui = b.addModule("ddui", .{
         .root_source_file = b.path("ddui.zig"),
     });

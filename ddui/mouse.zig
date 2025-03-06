@@ -32,8 +32,8 @@ fn InteractionOptions(comptime T: type) type {
 
 pub fn mouseTargetsEqual(comptime Target: type, a: Target, b: Target) bool {
     switch (@typeInfo(Target)) {
-        .Enum => return a == b,
-        .Struct, .Union => return a.eql(b),
+        .@"enum" => return a == b,
+        .@"struct", .@"union" => return a.eql(b),
         else => @compileError("don't know how to check if two mouse targets of type " ++ @typeName(Target) ++ " are equal"),
     }
 }

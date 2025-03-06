@@ -4,23 +4,9 @@ const win32 = @import("win32").everything;
 
 const HResultError = ddui.HResultError;
 
-threadlocal var thread_is_panicing = false;
-pub fn panic(
-    msg: []const u8,
-    error_return_trace: ?*std.builtin.StackTrace,
-    ret_addr: ?usize,
-) noreturn {
-    if (!thread_is_panicing) {
-        thread_is_panicing = true;
-        const msg_z: [:0]const u8 = if (std.fmt.allocPrintZ(
-            std.heap.page_allocator,
-            "{s}",
-            .{msg},
-        )) |msg_z| msg_z else |_| "failed allocate error message";
-        _ = win32.MessageBoxA(null, msg_z, "Ddui Example: Panic", .{ .ICONASTERISK = 1 });
-    }
-    std.builtin.default_panic(msg, error_return_trace, ret_addr);
-}
+pub const panic = win32.messageBoxThenPanic(.{
+    .title = "Ddui Example: Panic",
+});
 
 pub const ErrorCode = union(enum) {
     win32: win32.WIN32_ERROR,
@@ -28,7 +14,7 @@ pub const ErrorCode = union(enum) {
 };
 pub fn apiFailNoreturn(comptime function_name: []const u8, ec: ErrorCode) noreturn {
     switch (ec) {
-        .win32 => |e| std.debug.panic(function_name ++ " unexpectedly failed with {}", .{e.fmt()}),
+        .win32 => |e| std.debug.panic(function_name ++ " unexpectedly failed, error={}", .{e}),
         .hresult => |hr| std.debug.panic(function_name ++ " unexpectedly failed, hresult=0x{x}", .{@as(u32, @bitCast(hr))}),
     }
 }
