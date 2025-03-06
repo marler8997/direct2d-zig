@@ -8,17 +8,6 @@ pub const panic = win32.messageBoxThenPanic(.{
     .title = "Ddui Example: Panic",
 });
 
-pub const ErrorCode = union(enum) {
-    win32: win32.WIN32_ERROR,
-    hresult: i32,
-};
-pub fn apiFailNoreturn(comptime function_name: []const u8, ec: ErrorCode) noreturn {
-    switch (ec) {
-        .win32 => |e| std.debug.panic(function_name ++ " unexpectedly failed, error={}", .{e}),
-        .hresult => |hr| std.debug.panic(function_name ++ " unexpectedly failed, hresult=0x{x}", .{@as(u32, @bitCast(hr))}),
-    }
-}
-
 fn oom(e: error{OutOfMemory}) noreturn {
     @panic(@errorName(e));
 }
@@ -51,7 +40,7 @@ const global = struct {
 const Layout = struct {
     title: win32.RECT,
     new_window_button: win32.RECT,
-    pub fn update(self: *Layout, dpi: u32, client_size: XY(i32)) void {
+    pub fn update(self: *Layout, dpi: u32, client_size: win32.SIZE) void {
         const margin = win32.scaleDpi(i32, 30, dpi);
         // todo: actually calculate font metrics?
         const max_main_font_height: i32 = win32.scaleDpi(i32, 30, dpi);
@@ -63,11 +52,11 @@ const Layout = struct {
             .title = .{
                 .left = margin,
                 .top = margin,
-                .right = client_size.x - margin,
+                .right = client_size.cx - margin,
                 .bottom = title_bottom,
             },
             .new_window_button = ddui.rectIntFromSize(.{
-                .left = @divTrunc(client_size.x - button_width, 2),
+                .left = @divTrunc(client_size.cx - button_width, 2),
                 .top = button_y,
                 .width = button_width,
                 .height = button_height,
@@ -230,7 +219,7 @@ fn newWindow() void {
         };
         global.window_class = win32.RegisterClassExW(&wc);
     }
-    if (global.window_class == 0) apiFailNoreturn("RegisterClass", .{ .win32 = win32.GetLastError() });
+    if (global.window_class == 0) win32.panicWin32("RegisterClass", win32.GetLastError());
 
     const hwnd = win32.CreateWindowExW(
         .{},
@@ -245,7 +234,7 @@ fn newWindow() void {
         null, // menu
         win32.GetModuleHandleW(null),
         null, // WM_CREATE user data
-    ) orelse apiFailNoreturn("CreateWindow", .{ .win32 = win32.GetLastError() });
+    ) orelse win32.panicWin32("CreateWindow", win32.GetLastError());
 
     {
         // TODO: maybe use DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 if applicable
@@ -264,7 +253,7 @@ fn newWindow() void {
         );
     }
 
-    if (0 == win32.UpdateWindow(hwnd)) apiFailNoreturn("UpdateWindow", .{ .win32 = win32.GetLastError() });
+    if (0 == win32.UpdateWindow(hwnd)) win32.panicWin32("UpdateWindow", win32.GetLastError());
 
     // for some reason this causes the window to paint before being shown so we
     // don't get a white flicker when the window shows up
@@ -272,7 +261,7 @@ fn newWindow() void {
         .NOMOVE = 1,
         .NOSIZE = 1,
         .NOOWNERZORDER = 1,
-    })) apiFailNoreturn("SetWindowPos", .{ .win32 = win32.GetLastError() });
+    })) win32.panicWin32("SetWindowPos", win32.GetLastError());
     _ = win32.ShowWindow(hwnd, .{ .SHOWNORMAL = 1 });
     global.window_count += 1;
 }
@@ -293,7 +282,7 @@ pub export fn wWinMain(
             win32.IID_IDWriteFactory,
             @ptrCast(&global.dwrite_factory),
         );
-        if (hr < 0) apiFailNoreturn("DWriteCreateFactory", .{ .hresult = hr });
+        if (hr < 0) win32.panicHresult("DWriteCreateFactory", hr);
     }
     {
         var err: HResultError = undefined;
@@ -358,20 +347,12 @@ fn WndProc(
         },
         win32.WM_PAINT => {
             const dpi = win32.dpiFromHwnd(hwnd);
-            const client_size = getClientSize(hwnd);
+            const client_size = win32.getClientSize(hwnd);
             const state = stateFromHwnd(hwnd);
 
             const err: HResultError = blk: {
-                var ps: win32.PAINTSTRUCT = undefined;
-                _ = win32.BeginPaint(hwnd, &ps) orelse return apiFailNoreturn(
-                    "BeginPaint",
-                    .{ .win32 = win32.GetLastError() },
-                );
-                defer if (0 == win32.EndPaint(hwnd, &ps)) apiFailNoreturn(
-                    "EndPaint",
-                    .{ .win32 = win32.GetLastError() },
-                );
-
+                _, const ps = win32.beginPaint(hwnd);
+                defer win32.endPaint(hwnd, &ps);
                 if (state.maybe_d2d == null) {
                     var err: HResultError = undefined;
                     state.maybe_d2d = D2d.init(hwnd, &err) catch break :blk err;
@@ -381,8 +362,8 @@ fn WndProc(
 
                 {
                     const size: win32.D2D_SIZE_U = .{
-                        .width = @intCast(client_size.x),
-                        .height = @intCast(client_size.y),
+                        .width = @intCast(client_size.cx),
+                        .height = @intCast(client_size.cy),
                     };
                     const hr = state.maybe_d2d.?.target.Resize(&size);
                     if (hr < 0) break :blk HResultError{ .context = "D2dResize", .hr = hr };
@@ -417,21 +398,17 @@ fn WndProc(
             if (!state.bg_erased) {
                 state.bg_erased = true;
                 const hdc: win32.HDC = @ptrFromInt(wparam);
-                const client_size = getClientSize(hwnd);
-                const brush = win32.CreateSolidBrush(
+                const client_size = win32.getClientSize(hwnd);
+                const brush = win32.createSolidBrush(
                     colorrefFromShade(window_bg_shade),
-                ) orelse apiFailNoreturn("CreateSolidBrush", .{ .win32 = win32.GetLastError() });
-                defer if (0 == win32.DeleteObject(brush)) apiFailNoreturn("DeleteObject", .{ .win32 = win32.GetLastError() });
-                const client_rect: win32.RECT = .{
+                );
+                defer win32.deleteObject(brush);
+                win32.fillRect(hdc, .{
                     .left = 0,
                     .top = 0,
-                    .right = client_size.x,
-                    .bottom = client_size.y,
-                };
-                if (0 == win32.FillRect(hdc, &client_rect, brush)) apiFailNoreturn(
-                    "FillRect",
-                    .{ .win32 = win32.GetLastError() },
-                );
+                    .right = client_size.cx,
+                    .bottom = client_size.cy,
+                }, brush);
             }
             return 1;
         },
@@ -472,14 +449,6 @@ pub fn XY(comptime T: type) type {
             return .{ .x = x, .y = y };
         }
     };
-}
-
-fn getClientSize(hwnd: win32.HWND) XY(i32) {
-    var rect: win32.RECT = undefined;
-    if (0 == win32.GetClientRect(hwnd, &rect)) apiFailNoreturn("GetClientRect", .{ .win32 = win32.GetLastError() });
-    if (rect.left != 0) std.debug.panic("client rect non-zero left {}", .{rect.left});
-    if (rect.top != 0) std.debug.panic("client rect non-zero top {}", .{rect.top});
-    return .{ .x = rect.right, .y = rect.bottom };
 }
 
 fn colorrefFromShade(shade: u8) u32 {
