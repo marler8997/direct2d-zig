@@ -1,14 +1,6 @@
 const std = @import("std");
 const root = @import("root");
-const win32 = struct {
-    usingnamespace @import("win32").foundation;
-    usingnamespace @import("win32").graphics.direct_write;
-    usingnamespace @import("win32").graphics.direct2d.common;
-    usingnamespace @import("win32").graphics.gdi;
-    usingnamespace @import("win32").ui.windows_and_messaging;
-    usingnamespace @import("win32").graphics.direct2d;
-    usingnamespace @import("win32").zig;
-};
+const win32 = @import("win32").everything;
 pub const mouse = @import("ddui/mouse.zig");
 
 fn xFromLparam(lparam: win32.LPARAM) i16 {
